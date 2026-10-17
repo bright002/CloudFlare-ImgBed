@@ -33,10 +33,10 @@
             justify-content: space-between;
             align-items: center;
             z-index: 999;
-            transition: transform 0.3s ease-in-out; /* 平滑过渡动画 */
+            transition: transform 0.3s ease-in-out;
         }
         #menu.hidden {
-            transform: translateY(-100%); /* 向上滚动时隐藏 */
+            transform: translateY(-100%);
         }
 
         .menu-group {
@@ -66,7 +66,7 @@
         /* 漫画无缝条漫容器 */
         #reader-container {
             max-width: 900px;
-            margin: 70px auto 0 auto; /* 预留顶部菜单高度 */
+            margin: 70px auto 0 auto;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -124,14 +124,10 @@
     </div>
 
     <script>
-        // ==========================================
-        // 配置区域：图床 API 列表接口
-        // ==========================================
         const API_LIST_URL = '/api/manage/list'; 
+        let currentMode = 'fit-width';
+        let allFilesCache = []; // 缓存文件列表，避免重复请求
 
-        let currentMode = 'fit-width'; // 默认模式：fit-width (满宽) 或 fit-original (原始尺寸)
-
-        // 页面初始化
         window.addEventListener('DOMContentLoaded', () => {
             fetchFolderList();
             initScrollHideMenu();
@@ -144,13 +140,10 @@
 
             window.addEventListener('scroll', function() {
                 let currentScroll = window.pageYOffset || document.documentElement.scrollTop;
-                
                 if (currentScroll > 50) {
                     if (currentScroll > lastScrollTop) {
-                        // 向下滚动：隐藏 Menu
                         menu.classList.add('hidden');
                     } else {
-                        // 向上滚动：显示 Menu
                         menu.classList.remove('hidden');
                     }
                 } else {
@@ -163,24 +156,27 @@
         // 2. 获取图床目录列表
         async function fetchFolderList() {
             try {
-                // 如果图床单页限制了15个，可尝试带上 limit 参数拉取更多，如 /api/manage/list?limit=1000
                 const response = await fetch(API_LIST_URL);
                 const data = await response.json();
                 
-                const files = Array.isArray(data) ? data : (data.data || data.files || []);
-                processFolders(files);
+                // 完美兼容各种返回格式 (数组、{data: [...]}, {files: [...]})
+                allFilesCache = Array.isArray(data) ? data : (data.data || data.files || data.list || []);
+                
+                console.log("获取到的图床原始文件数:", allFilesCache.length);
+                processFolders(allFilesCache);
             } catch (error) {
                 console.error('获取目录失败:', error);
                 document.getElementById('loading-tip').innerText = '加载目录失败，请检查 API 接口。';
             }
         }
 
-        // 3. 提取文件夹并按高精度自然升序排序填充下拉菜单
+        // 3. 提取文件夹并按自然升序排序
         function processFolders(files) {
             const folderSet = new Set();
 
             files.forEach(file => {
-                const filePath = file.name || file.filename || file.path || '';
+                // 兼容所有可能的路径字段
+                const filePath = file.path || file.name || file.filename || file.key || '';
                 const lastSlashIndex = filePath.lastIndexOf('/');
                 
                 if (lastSlashIndex !== -1) {
@@ -190,11 +186,11 @@
             });
 
             const folders = Array.from(folderSet);
-            
-            // 💡 强制按自然升序排列（卷01、卷02、卷03...）
             folders.sort((a, b) => compareNatural(a, b));
 
             const select = document.getElementById('folder-select');
+            select.innerHTML = '<option value="">请选择卷册 / 目录</option>';
+
             folders.forEach(folder => {
                 const option = document.createElement('option');
                 option.value = folder;
@@ -206,7 +202,7 @@
                 select.value = folders[0];
                 changeFolder();
             } else {
-                document.getElementById('loading-tip').innerText = '未检测到任何云端虚拟文件夹，请先上传漫画。';
+                document.getElementById('loading-tip').innerText = '未检测到任何云端虚拟文件夹，请检查图片是否带目录路径。';
             }
         }
 
@@ -218,30 +214,20 @@
             const container = document.getElementById('reader-container');
             container.innerHTML = '<div id="loading-tip">正在加载漫画图片...</div>';
 
-            try {
-                const response = await fetch(API_LIST_URL);
-                const data = await response.json();
-                const files = Array.isArray(data) ? data : (data.data || data.files || []);
+            // 直接从缓存中筛选，提升响应速度
+            const folderImages = allFilesCache.filter(file => {
+                const filePath = file.path || file.name || file.filename || file.key || '';
+                return filePath.startsWith(selectedFolder + '/') && isImageFile(filePath);
+            });
 
-                // 筛选出当前选中文件夹下的图片文件
-                const folderImages = files.filter(file => {
-                    const filePath = file.name || file.filename || file.path || '';
-                    return filePath.startsWith(selectedFolder + '/') && isImageFile(filePath);
-                });
+            // 图片自然升序排序
+            folderImages.sort((a, b) => {
+                const pathA = a.path || a.name || a.filename || a.key || '';
+                const pathB = b.path || b.name || b.filename || b.key || '';
+                return compareNatural(pathA.split('/').pop(), pathB.split('/').pop());
+            });
 
-                // 💡 确保图片按自然升序排列 (000.jpg, 001.jpg, 002.jpg...)
-                folderImages.sort((a, b) => {
-                    const nameA = (a.name || a.filename || a.path || '').split('/').pop();
-                    const nameB = (b.name || b.filename || b.path || '').split('/').pop();
-                    return compareNatural(nameA, nameB);
-                });
-
-                renderImages(folderImages);
-
-            } catch (error) {
-                console.error('加载图片出错:', error);
-                container.innerHTML = '<div id="loading-tip">加载图片列表失败。</div>';
-            }
+            renderImages(folderImages);
         }
 
         // 5. 渲染无缝条漫图片列表
@@ -256,9 +242,9 @@
 
             images.forEach(img => {
                 const imgElement = document.createElement('img');
-                imgElement.src = img.url || img.src || img.link || ('/' + (img.name || img.filename || img.path));
+                imgElement.src = img.url || img.src || img.link || ('/' + (img.path || img.name || img.filename || img.key));
                 imgElement.className = 'manga-page';
-                imgElement.loading = 'lazy'; // 浏览器原生懒加载
+                imgElement.loading = 'lazy';
                 
                 imgElement.onerror = function() {
                     this.alt = '图片加载失败: ' + imgElement.src;
@@ -268,7 +254,7 @@
             });
         }
 
-        // 6. 切换阅读模式（自适应满宽 / 原始尺寸）
+        // 6. 切换阅读模式
         function toggleMode() {
             const container = document.getElementById('reader-container');
             const btn = document.getElementById('mode-btn');
