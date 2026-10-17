@@ -40,7 +40,7 @@
     @media (max-width: 1400px) { .gallery.waterfall { column-count: 3; } }
     @media (max-width: 900px)  { .gallery.waterfall { column-count: 2; } }
     @media (max-width: 500px)  { .gallery.waterfall { column-count: 1; } }
-    .gallery.waterfall .card { break-inside: avoid; margin-bottom: 14px; border-radius: 8px; overflow: hidden; background: #1e1e1e; position: relative; min-height: 200px; }
+    .gallery.waterfall .card { break-inside: avoid; margin-bottom: 14px; border-radius: 8px; overflow: hidden; background: #1e1e1e; position: relative; min-height: 200px; text-align: center; }
 
     .gallery.webtoon { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; background: #000; }
     .gallery.webtoon .card { width: 100%; margin: 0; position: relative; min-height: 400px; border-bottom: 1px solid #111; text-align: center; }
@@ -152,7 +152,7 @@
         }
         folderBar.innerHTML = folderHtml || '<span style="color:#666; font-size:13px;">当前目录下无子文件夹</span>';
 
-        // 1. 过滤图片文件（兼容字符串数组或对象数组）
+        // 1. 过滤图片文件
         let files = (data.files || data || []).filter(f => {
           const name = typeof f === 'string' ? f : (f.name || f.src || '');
           return /\.(jpe?g|png|webp|gif|avif)$/i.test(name);
@@ -198,15 +198,17 @@
         gallery.className = 'gallery ' + currentMode + ' ' + sizeClass;
         gallery.innerHTML = '';
 
-        // 3. 渲染页面 DOM
+        // 3. 渲染页面 DOM（自动剥离图床生成的时间戳前缀，展示干净文件名）
         files.forEach((item, idx) => {
           const rawName = typeof item === 'string' ? item : (item.name || item.src);
           const imgUrl = rawName.startsWith('http') ? rawName : `${domain}/file/${rawName.replace(/^\/?file\//, '')}`;
           
+          const cleanName = rawName.split('/').pop().replace(/^\d{10,}_/, '');
+
           const card = document.createElement('div');
           card.className = 'card';
           card.innerHTML = `
-            <a href="${imgUrl}" data-fancybox="manga-browser" data-caption="第 ${idx + 1} 页 - ${rawName}">
+            <a href="${imgUrl}" data-fancybox="manga-browser" data-caption="第 ${idx + 1} 页 - ${cleanName}">
               <img data-src="${imgUrl}" alt="Page ${idx + 1}" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 300 400'%3E%3C/svg%3E">
             </a>
             <span class="page-badge">${idx + 1} / ${files.length}</span>
