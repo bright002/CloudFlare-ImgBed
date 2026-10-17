@@ -8,25 +8,19 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { background-color: #121212; color: #e0e0e0; font-family: sans-serif; overflow-x: hidden; }
 
-        /* 顶部菜单栏：支持滚动平滑隐藏 */
+        /* 顶部菜单栏：平滑滚动隐藏 */
         #menu {
             position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
+            top: 0; left: 0; width: 100%;
             background: rgba(30, 30, 30, 0.9);
             backdrop-filter: blur(10px);
             border-bottom: 1px solid rgba(255, 255, 255, 0.1);
             padding: 10px 15px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+            display: flex; justify-content: space-between; align-items: center;
             z-index: 999;
             transition: transform 0.3s ease-in-out;
         }
-        #menu.hidden {
-            transform: translateY(-100%);
-        }
+        #menu.hidden { transform: translateY(-100%); }
 
         .menu-group { display: flex; align-items: center; gap: 10px; }
         select, button {
@@ -37,23 +31,16 @@
         select option { background: #222; color: #fff; }
 
         #reader-container {
-            max-width: 900px;
-            margin: 70px auto 0 auto;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            background-color: #000;
-            min-height: 100vh;
+            max-width: 900px; margin: 70px auto 0 auto;
+            display: flex; flex-direction: column; align-items: center;
+            background-color: #000; min-height: 100vh;
         }
-
         .manga-page {
             width: 100%; display: block; height: auto;
             margin: 0; padding: 0; border: none; outline: none; background-color: #1a1a1a;
         }
-
         #reader-container.fit-width .manga-page { width: 100% !important; }
         #reader-container.fit-original .manga-page { width: auto !important; max-width: none; }
-
         #loading-tip { padding: 40px; color: #888; font-size: 14px; }
     </style>
 </head>
@@ -83,18 +70,17 @@
             initScrollHideMenu();
         });
 
-        // 手机端滚动自动隐藏/显示 Menu
+        // 1. 纯净的滚动隐藏 Menu 逻辑
         function initScrollHideMenu() {
             let lastScrollTop = 0;
             const menu = document.getElementById('menu');
-
             window.addEventListener('scroll', () => {
                 let currentScroll = window.pageYOffset || document.documentElement.scrollTop;
                 if (currentScroll > 50) {
                     if (currentScroll > lastScrollTop) {
-                        menu.classList.add('hidden'); // 向下滚动隐藏
+                        menu.classList.add('hidden');
                     } else {
-                        menu.classList.remove('hidden'); // 向上滚动显示
+                        menu.classList.remove('hidden');
                     }
                 } else {
                     menu.classList.remove('hidden');
@@ -103,45 +89,43 @@
             }, false);
         }
 
+        // 2. 原汁原味的获取目录逻辑（只加了 sort 自然排序）
         async function fetchFolderList() {
             try {
                 const response = await fetch(API_LIST_URL);
                 const data = await response.json();
                 const files = Array.isArray(data) ? data : (data.data || data.files || []);
-                processFolders(files);
+                
+                const folderSet = new Set();
+                files.forEach(file => {
+                    const filePath = file.name || file.filename || file.path || '';
+                    const lastSlashIndex = filePath.lastIndexOf('/');
+                    if (lastSlashIndex !== -1) {
+                        folderSet.add(filePath.substring(0, lastSlashIndex));
+                    }
+                });
+
+                const folders = Array.from(folderSet);
+                folders.sort((a, b) => compareNatural(a, b)); // 加上升序
+
+                const select = document.getElementById('folder-select');
+                folders.forEach(folder => {
+                    const option = document.createElement('option');
+                    option.value = folder;
+                    option.textContent = folder;
+                    select.appendChild(option);
+                });
+
+                if (folders.length > 0) {
+                    select.value = folders[0];
+                    changeFolder();
+                }
             } catch (error) {
                 console.error('获取目录失败:', error);
             }
         }
 
-        function processFolders(files) {
-            const folderSet = new Set();
-            files.forEach(file => {
-                const filePath = file.name || file.filename || file.path || '';
-                const lastSlashIndex = filePath.lastIndexOf('/');
-                if (lastSlashIndex !== -1) {
-                    folderSet.add(filePath.substring(0, lastSlashIndex));
-                }
-            });
-
-            const folders = Array.from(folderSet);
-            // 💡 采用高精度自然升序排序（保证 卷01 在 卷02 前面）
-            folders.sort((a, b) => compareNatural(a, b));
-
-            const select = document.getElementById('folder-select');
-            folders.forEach(folder => {
-                const option = document.createElement('option');
-                option.value = folder;
-                option.textContent = folder;
-                select.appendChild(option);
-            });
-
-            if (folders.length > 0) {
-                select.value = folders[0];
-                changeFolder();
-            }
-        }
-
+        // 3. 原汁原味的切换卷册逻辑（只加了 sort 自然排序）
         async function changeFolder() {
             const selectedFolder = document.getElementById('folder-select').value;
             if (!selectedFolder) return;
@@ -159,33 +143,29 @@
                     return filePath.startsWith(selectedFolder + '/') && isImageFile(filePath);
                 });
 
-                // 💡 图片文件名自然升序排序 (000.jpg, 001.jpg...)
                 folderImages.sort((a, b) => {
                     const nameA = (a.name || a.filename || a.path || '').split('/').pop();
                     const nameB = (b.name || b.filename || b.path || '').split('/').pop();
-                    return compareNatural(nameA, nameB);
+                    return compareNatural(nameA, nameB); // 图片名升序
                 });
 
-                renderImages(folderImages);
+                container.innerHTML = '';
+                if (folderImages.length === 0) {
+                    container.innerHTML = '<div id="loading-tip">该目录下没有找到图片文件。</div>';
+                    return;
+                }
+
+                folderImages.forEach(img => {
+                    const imgElement = document.createElement('img');
+                    imgElement.src = img.url || img.src || img.link || ('/' + (img.name || img.filename || img.path));
+                    imgElement.className = 'manga-page';
+                    imgElement.loading = 'lazy';
+                    container.appendChild(imgElement);
+                });
+
             } catch (error) {
                 container.innerHTML = '<div id="loading-tip">加载图片失败。</div>';
             }
-        }
-
-        function renderImages(images) {
-            const container = document.getElementById('reader-container');
-            container.innerHTML = '';
-            if (images.length === 0) {
-                container.innerHTML = '<div id="loading-tip">该目录下没有找到图片文件。</div>';
-                return;
-            }
-            images.forEach(img => {
-                const imgElement = document.createElement('img');
-                imgElement.src = img.url || img.src || img.link || ('/' + (img.name || img.filename || img.path));
-                imgElement.className = 'manga-page';
-                imgElement.loading = 'lazy';
-                container.appendChild(imgElement);
-            });
         }
 
         function toggleMode() {
@@ -204,7 +184,6 @@
             }
         }
 
-        // 高精度自然排序算法
         function compareNatural(a, b) {
             const ax = [], bx = [];
             a.replace(/(\d+)|(\D+)/g, (_, $1, $2) => { ax.push([$1 || Infinity, $2 || '']); });
