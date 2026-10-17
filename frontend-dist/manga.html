@@ -3,203 +3,466 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>漫画无缝阅读器</title>
+    <title>Cloudflare-ImgBed 漫画阅读器</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { background-color: #121212; color: #e0e0e0; font-family: sans-serif; overflow-x: hidden; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background-color: #121212;
+            color: #e0e0e0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            overflow-x: hidden;
+        }
 
-        /* 顶部菜单栏：平滑滚动隐藏 */
-        #menu {
+        /* 顶部导航与目录控制栏：支持滚动平滑隐藏 */
+        #top-header {
             position: fixed;
-            top: 0; left: 0; width: 100%;
-            background: rgba(30, 30, 30, 0.9);
+            top: 0;
+            left: 0;
+            width: 100%;
+            background: rgba(24, 24, 28, 0.95);
             backdrop-filter: blur(10px);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-            padding: 10px 15px;
-            display: flex; justify-content: space-between; align-items: center;
-            z-index: 999;
+            -webkit-backdrop-filter: blur(10px);
+            border-bottom: 1px solid #2d2d35;
+            padding: 12px 16px;
+            z-index: 1000;
             transition: transform 0.3s ease-in-out;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
         }
-        #menu.hidden { transform: translateY(-100%); }
+        /* 向下滚动时整个顶部栏向上平移隐藏 */
+        #top-header.hidden {
+            transform: translateY(-100%);
+        }
 
-        .menu-group { display: flex; align-items: center; gap: 10px; }
-        select, button {
-            background: rgba(255, 255, 255, 0.1); color: #fff;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            padding: 6px 12px; border-radius: 6px; font-size: 14px; outline: none; cursor: pointer;
+        .control-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
         }
-        select option { background: #222; color: #fff; }
 
-        #reader-container {
-            max-width: 900px; margin: 70px auto 0 auto;
-            display: flex; flex-direction: column; align-items: center;
-            background-color: #000; min-height: 100vh;
+        .input-path {
+            flex: 1;
+            min-width: 180px;
+            background: #1e1e24;
+            border: 1px solid #383842;
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            outline: none;
         }
-        .manga-page {
-            width: 100%; display: block; height: auto;
-            margin: 0; padding: 0; border: none; outline: none; background-color: #1a1a1a;
+        .input-path:focus, .input-pwd:focus {
+            border-color: #3b82f6;
         }
-        #reader-container.fit-width .manga-page { width: 100% !important; }
-        #reader-container.fit-original .manga-page { width: auto !important; max-width: none; }
-        #loading-tip { padding: 40px; color: #ff6b6b; font-size: 14px; text-align: center; }
+
+        .input-pwd {
+            width: 210px;
+            background: #1e1e24;
+            border: 1px solid #383842;
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            outline: none;
+        }
+
+        .btn {
+            border: none;
+            padding: 8px 14px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            color: #fff;
+            background: #2b2d38;
+            border: 1px solid #3e4152;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+        .btn:hover {
+            filter: brightness(1.15);
+        }
+        .btn-primary {
+            background: #2563eb;
+            border-color: #3b82f6;
+        }
+        .btn-green {
+            background: #10b981;
+            border-color: #059669;
+        }
+        .btn-dark {
+            background: #2b2d38;
+            border-color: #3e4152;
+        }
+
+        /* 文件夹导航按钮行 */
+        #folder-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #26262e;
+        }
+        #folder-bar:empty {
+            display: none;
+            margin-top: 0;
+            padding-top: 0;
+            border-top: none;
+        }
+
+        .folder-btn {
+            background: #252836;
+            border: 1px solid #393d52;
+            color: #d1d5db;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: background 0.2s;
+        }
+        .folder-btn:hover {
+            background: #32364a;
+            color: #fff;
+        }
+
+        /* 漫画内容主容器 */
+        #main-content {
+            margin-top: 120px; /* 动态计算预留高度 */
+            min-height: calc(100vh - 120px);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        /* 模式 1：无缝条漫模式 */
+        #reader-container.mode-webtoon {
+            width: 100%;
+            max-width: 900px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: #000;
+        }
+        #reader-container.mode-webtoon .manga-item {
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            margin: 0;
+            padding: 0;
+        }
+        #reader-container.mode-webtoon .manga-item img {
+            display: block;
+            margin: 0;
+            padding: 0;
+            border: none;
+        }
+
+        /* 自适应满宽 vs 原始尺寸 */
+        #reader-container.fit-width .manga-item img {
+            width: 100%;
+            height: auto;
+        }
+        #reader-container.fit-original .manga-item img {
+            width: auto;
+            max-width: 100%;
+            height: auto;
+        }
+
+        /* 模式 2：瀑布流网格模式 */
+        #reader-container.mode-waterfall {
+            width: 100%;
+            max-width: 1400px;
+            padding: 15px;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 15px;
+        }
+        #reader-container.mode-waterfall .manga-item {
+            background: #1e1e24;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid #2e2e38;
+            display: flex;
+            flex-direction: column;
+        }
+        #reader-container.mode-waterfall .manga-item img {
+            width: 100%;
+            height: 280px;
+            object-fit: cover;
+            display: block;
+        }
+        #reader-container.mode-waterfall .manga-caption {
+            padding: 8px;
+            font-size: 12px;
+            color: #aaa;
+            text-align: center;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        #reader-container.mode-webtoon .manga-caption {
+            display: none;
+        }
+
+        .status-msg {
+            margin-top: 60px;
+            color: #888;
+            font-size: 15px;
+            text-align: center;
+            padding: 20px;
+        }
+
+        /* 手机端紧凑布局优化 */
+        @media (max-width: 640px) {
+            #top-header {
+                padding: 8px 10px;
+            }
+            .input-path {
+                min-width: 120px;
+                padding: 6px 10px;
+                font-size: 13px;
+            }
+            .input-pwd {
+                width: 130px;
+                padding: 6px 10px;
+                font-size: 13px;
+            }
+            .btn {
+                padding: 6px 10px;
+                font-size: 12px;
+            }
+            .folder-btn {
+                padding: 5px 10px;
+                font-size: 12px;
+            }
+        }
     </style>
 </head>
 <body>
 
-    <div id="menu">
-        <div class="menu-group">
-            <select id="folder-select" onchange="changeFolder()">
-                <option value="">请选择卷册 / 目录</option>
-            </select>
+    <!-- 顶部控制菜单栏（向下滚动时会自动隐藏） -->
+    <div id="top-header">
+        <div class="control-bar">
+            <input type="text" id="dir-input" class="input-path" placeholder="输入目录路径，如：漫画/監獄學園" value="漫画">
+            <input type="password" id="pwd-input" class="input-pwd" placeholder="后台密码 (Basic 认证, 如无留空)">
+            <button class="btn btn-primary" onclick="loadDirectory()">📁 加载漫画</button>
+            <button class="btn btn-green" id="fit-btn" onclick="toggleFit()">📏 自适应满宽</button>
+            <button class="btn btn-dark" id="waterfall-btn" onclick="setLayout('waterfall')">🌊 瀑布流</button>
+            <button class="btn btn-green" id="webtoon-btn" onclick="setLayout('webtoon')">📜 无缝条漫</button>
         </div>
-        <div class="menu-group">
-            <button id="mode-btn" onclick="toggleMode()">切换：满宽</button>
-        </div>
+        <!-- 子目录按钮展示区 -->
+        <div id="folder-bar"></div>
     </div>
 
-    <div id="reader-container" class="fit-width">
-        <div id="loading-tip">正在请求图床接口...</div>
+    <!-- 漫画展示区 -->
+    <div id="main-content">
+        <div id="reader-container" class="mode-webtoon fit-width">
+            <div class="status-msg">正在加载漫画目录...</div>
+        </div>
     </div>
 
     <script>
-        const API_LIST_URL = '/api/manage/list';
-        let currentMode = 'fit-width';
-        let cachedFiles = [];
+        let currentFit = 'width';      // 'width' 或 'original'
+        let currentLayout = 'webtoon'; // 'webtoon' 或 'waterfall'
 
         window.addEventListener('DOMContentLoaded', () => {
-            fetchFolderList();
-            initScrollHideMenu();
+            // 恢复本地保存的密码和上次访问的路径
+            const savedPwd = localStorage.getItem('imgbed_pwd');
+            const savedDir = localStorage.getItem('imgbed_dir');
+            if (savedPwd) document.getElementById('pwd-input').value = savedPwd;
+            if (savedDir !== null) document.getElementById('dir-input').value = savedDir;
+
+            // 支持在输入框按回车直接加载
+            document.getElementById('dir-input').addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') loadDirectory();
+            });
+
+            initScrollHideHeader();
+            adjustContentMargin();
+            loadDirectory();
         });
 
-        function initScrollHideMenu() {
+        window.addEventListener('resize', adjustContentMargin);
+
+        // 动态计算顶部菜单栏高度，防止挡住第一张漫画顶部
+        function adjustContentMargin() {
+            const header = document.getElementById('top-header');
+            const main = document.getElementById('main-content');
+            if (header && main) {
+                main.style.marginTop = (header.offsetHeight + 10) + 'px';
+            }
+        }
+
+        // 1. 手机端/电脑端向下滚动自动隐藏顶部菜单栏逻辑
+        function initScrollHideHeader() {
             let lastScrollTop = 0;
-            const menu = document.getElementById('menu');
+            const header = document.getElementById('top-header');
+
             window.addEventListener('scroll', () => {
-                let currentScroll = window.pageYOffset || document.documentElement.scrollTop;
-                if (currentScroll > 50) {
-                    if (currentScroll > lastScrollTop) {
-                        menu.classList.add('hidden');
-                    } else {
-                        menu.classList.remove('hidden');
-                    }
-                } else {
-                    menu.classList.remove('hidden');
-                }
-                lastScrollTop = currentScroll <= 0 ? 0 : currentScroll;
-            }, false);
-        }
-
-        async function fetchFolderList() {
-            const tip = document.getElementById('loading-tip');
-            try {
-                const response = await fetch(API_LIST_URL);
-                if (!response.ok) {
-                    throw new Error(`HTTP 错误! 状态码: ${response.status}`);
-                }
-                const data = await response.json();
-                cachedFiles = Array.isArray(data) ? data : (data.data || data.files || data.list || []);
+                let st = window.pageYOffset || document.documentElement.scrollTop;
                 
-                if (cachedFiles.length === 0) {
-                    tip.innerText = '接口请求成功，但返回的文件列表为空！';
-                    return;
+                // 向下滚动超过 60px 且继续往下滑时，隐藏菜单栏
+                if (st > 60) {
+                    if (st > lastScrollTop + 5) {
+                        header.classList.add('hidden');
+                    } else if (st < lastScrollTop - 10) {
+                        // 手指稍微向上滑一点，立刻呼出菜单栏
+                        header.classList.remove('hidden');
+                    }
+                } else {
+                    // 回到顶部区域始终显示
+                    header.classList.remove('hidden');
+                }
+                lastScrollTop = st <= 0 ? 0 : st;
+            }, { passive: true });
+        }
+
+        // 2. 高精度自然升序排序算法（确保 卷01 在 卷02 前面，001.jpg 在 002.jpg 前面）
+        function compareNatural(a, b) {
+            return String(a).localeCompare(String(b), 'zh-CN', { numeric: true, sensitivity: 'base' });
+        }
+
+        // 3. 请求并加载指定目录
+        async function loadDirectory(targetDir) {
+            const dirInput = document.getElementById('dir-input');
+            const pwdInput = document.getElementById('pwd-input');
+            const container = document.getElementById('reader-container');
+            const folderBar = document.getElementById('folder-bar');
+
+            if (targetDir !== undefined) {
+                dirInput.value = targetDir;
+            }
+
+            // 清理前后的多余斜杠
+            const currentDir = dirInput.value.trim().replace(/^\/+|\/+$/g, '');
+            dirInput.value = currentDir;
+
+            localStorage.setItem('imgbed_dir', currentDir);
+            localStorage.setItem('imgbed_pwd', pwdInput.value);
+
+            container.innerHTML = '<div class="status-msg">正在加载目录数据...</div>';
+
+            try {
+                // 带上 dir 和 count 参数，突破默认 15 张限制，一次性拉取整话漫画
+                const params = new URLSearchParams();
+                if (currentDir) params.set('dir', currentDir);
+                params.set('count', '1000');
+                params.set('limit', '1000');
+
+                const headers = {};
+                const pwd = pwdInput.value.trim();
+                if (pwd) {
+                    // 兼容携带了冒号的 user:pass 或纯密码的 Basic Auth / Bearer
+                    if (pwd.includes(':')) {
+                        headers['Authorization'] = 'Basic ' + btoa(unescape(encodeURIComponent(pwd)));
+                    } else {
+                        headers['Authorization'] = 'Basic ' + btoa(unescape(encodeURIComponent('admin:' + pwd)));
+                    }
                 }
 
-                const folderSet = new Set();
-                cachedFiles.forEach(file => {
-                    const filePath = file.name || file.filename || file.path || '';
-                    const lastSlashIndex = filePath.lastIndexOf('/');
-                    if (lastSlashIndex !== -1) {
-                        folderSet.add(filePath.substring(0, lastSlashIndex));
+                const response = await fetch(`/api/manage/list?${params.toString()}`, {
+                    headers,
+                    credentials: 'include'
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP 状态码: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                // 解析子文件夹与文件列表（兼容 Cloudflare-ImgBed 多种返回格式）
+                let rawDirs = data.directories || data.dirs || data.folders || [];
+                let rawFiles = Array.isArray(data) ? data : (data.files || data.data || data.list || []);
+
+                const dirSet = new Set();
+                rawDirs.forEach(d => {
+                    const dName = typeof d === 'string' ? d : (d.name || d.path || '');
+                    if (dName) dirSet.add(dName.replace(/^\/+|\/+$/g, ''));
+                });
+
+                const imageList = [];
+
+                rawFiles.forEach(item => {
+                    const rawName = item.name || item.id || item.key || item.path || '';
+                    const cleanName = rawName.replace(/^\/+/, '');
+                    if (!cleanName) return;
+
+                    // 如果接口返回的是全部文件路径，提取当前层级的子目录
+                    if (currentDir && cleanName.startsWith(currentDir + '/')) {
+                        const subPath = cleanName.slice(currentDir.length + 1);
+                        if (subPath.includes('/')) {
+                            const nextDir = currentDir + '/' + subPath.split('/')[0];
+                            dirSet.add(nextDir);
+                            return;
+                        }
+                    } else if (!currentDir && cleanName.includes('/')) {
+                        dirSet.add(cleanName.split('/')[0]);
+                        return;
+                    }
+
+                    if (isImageFile(cleanName)) {
+                        imageList.push({
+                            name: cleanName,
+                            shortName: cleanName.split('/').pop(),
+                            url: item.url || item.src || ('/file/' + cleanName)
+                        });
                     }
                 });
 
-                const folders = Array.from(folderSet);
-                folders.sort((a, b) => compareNatural(a, b));
+                // 渲染文件夹导航按钮（强制自然升序）
+                renderFolderBar(currentDir, Array.from(dirSet));
 
-                const select = document.getElementById('folder-select');
-                folders.forEach(folder => {
-                    const option = document.createElement('option');
-                    option.value = folder;
-                    option.textContent = folder;
-                    select.appendChild(option);
-                });
+                // 渲染当前目录下的漫画图片（强制自然升序）
+                renderImages(imageList);
 
-                if (folders.length > 0) {
-                    select.value = folders[0];
-                    changeFolder();
-                } else {
-                    tip.innerText = '未在返回的数据中检测到带斜杠 (/) 的目录结构！';
-                }
-            } catch (error) {
-                console.error('获取目录失败:', error);
-                tip.innerText = '请求接口异常: ' + error.message + '\n请检查 /api/manage/list 是否正确或需鉴权';
+                // 重新计算顶部高度并回到页面顶部
+                setTimeout(adjustContentMargin, 50);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+
+            } catch (err) {
+                console.error('加载失败:', err);
+                container.innerHTML = `<div class="status-msg" style="color:#ef4444;">加载失败: ${err.message}</div>`;
             }
         }
 
-        async function changeFolder() {
-            const selectedFolder = document.getElementById('folder-select').value;
-            if (!selectedFolder) return;
+        // 4. 渲染子目录按钮栏（按升序排列：卷01 -> 卷02 -> 卷03）
+        function renderFolderBar(currentDir, dirs) {
+            const folderBar = document.getElementById('folder-bar');
+            folderBar.innerHTML = '';
 
-            const container = document.getElementById('reader-container');
-            container.innerHTML = '<div id="loading-tip">正在加载图片...</div>';
+            // 如果当前不在根目录，提供“返回上一级”按钮
+            if (currentDir) {
+                const parts = currentDir.split('/');
+                parts.pop();
+                const parentDir = parts.join('/');
 
-            const folderImages = cachedFiles.filter(file => {
-                const filePath = file.name || file.filename || file.path || '';
-                return filePath.startsWith(selectedFolder + '/') && isImageFile(filePath);
-            });
-
-            folderImages.sort((a, b) => {
-                const nameA = (a.name || a.filename || a.path || '').split('/').pop();
-                const nameB = (b.name || b.filename || b.path || '').split('/').pop();
-                return compareNatural(nameA, nameB);
-            });
-
-            container.innerHTML = '';
-            if (folderImages.length === 0) {
-                container.innerHTML = '<div id="loading-tip">该目录下没有找到图片文件。</div>';
-                return;
+                const backBtn = document.createElement('button');
+                backBtn.className = 'folder-btn';
+                backBtn.innerHTML = '⬅ 返回上一级';
+                backBtn.onclick = () => loadDirectory(parentDir);
+                folderBar.appendChild(backBtn);
             }
 
-            folderImages.forEach(img => {
-                const imgElement = document.createElement('img');
-                imgElement.src = img.url || img.src || img.link || ('/' + (img.name || img.filename || img.path));
-                imgElement.className = 'manga-page';
-                imgElement.loading = 'lazy';
-                container.appendChild(imgElement);
-            });
-        }
+            // 💡 关键：对所有子文件夹名称进行自然升序排序
+            dirs.sort((a, b) => compareNatural(a, b));
 
-        function toggleMode() {
-            const container = document.getElementById('reader-container');
-            const btn = document.getElementById('mode-btn');
-            if (currentMode === 'fit-width') {
-                currentMode = 'fit-original';
-                container.classList.remove('fit-width');
-                container.classList.add('fit-original');
-                btn.textContent = '切换：原图';
-            } else {
-                currentMode = 'fit-width';
-                container.classList.remove('fit-original');
-                container.classList.add('fit-width');
-                btn.textContent = '切换：满宽';
-            }
-        }
+            dirs.forEach(dirPath => {
+                // 如果返回的只是子文件夹名而非完整路径，自动补全前缀
+                const fullDirPath = (currentDir && !dirPath.startsWith(currentDir + '/'))
+                    ? `${currentDir}/${dirPath}`
+                    : dirPath;
 
-        function compareNatural(a, b) {
-            const ax = [], bx = [];
-            a.replace(/(\d+)|(\D+)/g, (_, $1, $2) => { ax.push([$1 || Infinity, $2 || '']); });
-            b.replace(/(\d+)|(\D+)/g, (_, $1, $2) => { bx.push([$1 || Infinity, $2 || '']); });
-            while (ax.length && bx.length) {
-                const an = ax.shift(), bn = bx.shift();
-                const nn = (an[0] - bn[0]) || an[1].localeCompare(bn[1]);
-                if (nn) return nn;
-            }
-            return ax.length - bx.length;
-        }
-
-        function isImageFile(filename) {
-            return /\.(jpg|jpeg|png|webp|avif|gif)$/i.test(filename);
-        }
-    </script>
-</body>
-</html>
+                const btn = document.createElement('
