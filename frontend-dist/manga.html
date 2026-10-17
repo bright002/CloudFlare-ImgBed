@@ -1,236 +1,310 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>私人云端漫画浏览器</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/ui@5.0/dist/fancybox/fancybox.css" />
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: #121212; color: #e0e0e0; font-family: system-ui, sans-serif; }
-    
-    .toolbar {
-      position: sticky; top: 0; z-index: 100;
-      background: rgba(20, 20, 20, 0.95); backdrop-filter: blur(10px);
-      padding: 12px 20px; border-bottom: 1px solid #333;
-      display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-    }
-    input, button {
-      background: #262626; color: #fff; border: 1px solid #444;
-      padding: 8px 12px; border-radius: 6px; font-size: 14px;
-    }
-    button { background: #2563eb; border: none; cursor: pointer; font-weight: 600; }
-    button:hover { background: #1d4ed8; }
-    .mode-btn { background: #374151; }
-    .mode-btn.active { background: #10b981; }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>漫画无缝阅读器</title>
+    <style>
+        /* 全局重置与沉浸式背景 */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background-color: #121212;
+            color: #e0e0e0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            overflow-x: hidden;
+        }
 
-    .folder-bar {
-      padding: 12px 20px; background: #181818; border-bottom: 1px solid #222;
-      display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
-    }
-    .folder-tag {
-      padding: 6px 12px; background: #2d3748; border-radius: 6px;
-      cursor: pointer; font-size: 13px; user-select: none;
-    }
-    .folder-tag:hover { background: #4a5568; }
+        /* 顶部菜单栏：支持滚动平滑隐藏 */
+        #menu {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            background: rgba(30, 30, 30, 0.85);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 10px 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 999;
+            transition: transform 0.3s ease-in-out; /* 平滑过渡动画 */
+        }
+        #menu.hidden {
+            transform: translateY(-100%); /* 向上滚动时隐藏 */
+        }
 
-    /* 布局模式 */
-    .gallery.waterfall { padding: 16px; column-count: 4; column-gap: 14px; }
-    @media (max-width: 1400px) { .gallery.waterfall { column-count: 3; } }
-    @media (max-width: 900px)  { .gallery.waterfall { column-count: 2; } }
-    @media (max-width: 500px)  { .gallery.waterfall { column-count: 1; } }
-    .gallery.waterfall .card { break-inside: avoid; margin-bottom: 14px; border-radius: 8px; overflow: hidden; background: #1e1e1e; position: relative; min-height: 200px; text-align: center; }
+        .menu-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
 
-    .gallery.webtoon { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; background: #000; }
-    .gallery.webtoon .card { width: 100%; margin: 0; position: relative; min-height: 400px; border-bottom: 1px solid #111; text-align: center; }
+        select, button {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            outline: none;
+            cursor: pointer;
+        }
+        select option {
+            background: #222;
+            color: #fff;
+        }
+        button:hover, select:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
 
-    /* 宽度控制 */
-    .gallery.fit-width .card img {
-      width: 100% !important; max-width: 100% !important; height: auto; display: block; margin: 0 auto; cursor: zoom-in;
-    }
-    .gallery.orig-size .card img {
-      width: auto !important; max-width: 100%; height: auto; display: inline-block; cursor: zoom-in;
-    }
+        /* 漫画无缝条漫容器 */
+        #reader-container {
+            max-width: 900px;
+            margin: 70px auto 0 auto; /* 预留顶部菜单高度 */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #000;
+            min-height: 100vh;
+        }
 
-    .page-badge {
-      position: absolute; bottom: 8px; right: 8px;
-      background: rgba(0,0,0,0.7); color: #ccc; font-size: 11px;
-      padding: 3px 7px; border-radius: 4px; pointer-events: none;
-    }
-  </style>
+        /* 漫画图片基础样式 */
+        .manga-page {
+            width: 100%;
+            display: block;
+            height: auto;
+            margin: 0;
+            padding: 0;
+            border: none;
+            outline: none;
+            background-color: #1a1a1a; 
+        }
+
+        /* 适配模式样式 */
+        #reader-container.fit-width .manga-page {
+            width: 100% !important;
+            max-width: 100%;
+        }
+        #reader-container.fit-original .manga-page {
+            width: auto !important;
+            max-width: none;
+        }
+
+        /* 加载提示文字 */
+        #loading-tip {
+            padding: 40px;
+            color: #888;
+            font-size: 14px;
+        }
+    </style>
 </head>
 <body>
 
-  <div class="toolbar">
-    <input type="text" id="dir" value="" placeholder="输入漫画文件夹 (例如 狱学/vol01)" style="flex:1; min-width:280px;">
-    <input type="password" id="token" placeholder="后台密码 (Basic 认证，如 admin:密码)" style="width:200px;">
-    <button onclick="loadManga()">📂 加载漫画</button>
-    
-    <div style="margin-left:auto; display:flex; gap:8px; flex-wrap:wrap;">
-      <button id="btnSize" class="mode-btn active" onclick="toggleSize()">📏 自适应满宽</button>
-      <!-- 注意：这里默认把条漫按钮设为 active，瀑布流取消 active -->
-      <button id="btnWf" class="mode-btn" onclick="setMode('waterfall')">🌊 瀑布流</button>
-      <button id="btnWt" class="mode-btn active" onclick="setMode('webtoon')">📜 无缝条漫</button>
+    <!-- 顶部控制菜单栏 -->
+    <div id="menu">
+        <div class="menu-group">
+            <select id="folder-select" onchange="changeFolder()">
+                <option value="">请选择卷册 / 目录</option>
+            </select>
+        </div>
+        <div class="menu-group">
+            <button id="mode-btn" onclick="toggleMode()">切换：满宽</button>
+        </div>
     </div>
-  </div>
 
-  <div class="folder-bar" id="folders"></div>
-  <!-- 注意：这里默认把主容器初始类名设为 webtoon -->
-  <div id="gallery" class="gallery webtoon fit-width"></div>
+    <!-- 无缝条漫图片展示区 -->
+    <div id="reader-container" class="fit-width">
+        <div id="loading-tip">正在加载目录与图片...</div>
+    </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/ui@5.0/dist/fancybox/fancybox.umd.js"></script>
-  <script>
-    Fancybox.bind("[data-fancybox='manga-browser']", { Hash: false });
-    document.getElementById('token').value = localStorage.getItem('imgbed_auth') || '';
+    <script>
+        // ==========================================
+        // 配置区域：图床 API 列表接口
+        // ==========================================
+        const API_LIST_URL = '/api/manage/list'; 
 
-    let isFitWidth = true;
+        let currentMode = 'fit-width'; // 默认模式：fit-width (满宽) 或 fit-original (原始尺寸)
 
-    function setMode(mode) {
-      const gallery = document.getElementById('gallery');
-      const sizeClass = isFitWidth ? 'fit-width' : 'orig-size';
-      gallery.className = 'gallery ' + mode + ' ' + sizeClass;
-      
-      document.getElementById('btnWf').classList.toggle('active', mode === 'waterfall');
-      document.getElementById('btnWt').classList.toggle('active', mode === 'webtoon');
-    }
-
-    function toggleSize() {
-      isFitWidth = !isFitWidth;
-      const gallery = document.getElementById('gallery');
-      const btn = document.getElementById('btnSize');
-      
-      if (isFitWidth) {
-        gallery.classList.replace('orig-size', 'fit-width');
-        btn.textContent = '📏 自适应满宽';
-        btn.classList.add('active');
-      } else {
-        gallery.classList.replace('fit-width', 'orig-size');
-        btn.textContent = '🔍 原始尺寸';
-        btn.classList.remove('active');
-      }
-    }
-
-    async function loadManga() {
-      const domain = window.location.origin;
-      const dir = document.getElementById('dir').value.trim();
-      const auth = document.getElementById('token').value.trim();
-      localStorage.setItem('imgbed_auth', auth);
-
-      const gallery = document.getElementById('gallery');
-      const folderBar = document.getElementById('folders');
-      gallery.innerHTML = '<p style="padding:40px; text-align:center; color:#888;">正在连接图床加载目录...</p>';
-      folderBar.innerHTML = '';
-
-      const headers = {};
-      if (auth) {
-        headers['Authorization'] = auth.includes(':') ? 'Basic ' + btoa(auth) : 'Bearer ' + auth;
-      }
-
-      const apiUrl = `${domain}/api/manage/list?dir=${encodeURIComponent(dir)}&start=0&count=400`;
-      try {
-        const res = await fetch(apiUrl, { headers, credentials: 'include' });
-        if (!res.ok) throw new Error('API 请求失败，请检查密码或登录状态');
-        const data = await res.json();
-
-        let folderHtml = '';
-        if (dir) {
-          const parentDir = dir.includes('/') ? dir.substring(0, dir.lastIndexOf('/')) : '';
-          folderHtml += `<span class="folder-tag" onclick="enterDir('${parentDir}')">⬅ 返回上一级</span>`;
-        }
-        if (data.directories && data.directories.length > 0) {
-          folderHtml += data.directories.map(d => 
-            `<span class="folder-tag" onclick="enterDir('${d}')">📁 ${d}</span>`
-          ).join('');
-        }
-        folderBar.innerHTML = folderHtml || '<span style="color:#666; font-size:13px;">当前目录下无子文件夹</span>';
-
-        let files = (data.files || data || []).filter(f => {
-          const name = typeof f === 'string' ? f : (f.name || f.src || '');
-          return /\.(jpe?g|png|webp|gif|avif)$/i.test(name);
+        // 页面初始化
+        window.addEventListener('DOMContentLoaded', () => {
+            fetchFolderList();
+            initScrollHideMenu();
         });
 
-        if (files.length === 0) {
-          gallery.innerHTML = '<p style="padding:40px; text-align:center; color:#888;">该目录下没有找到任何图片文件，请确认路径是否正确。</p>';
-          return;
+        // 1. 手机端滚动自动隐藏/显示 Menu 栏逻辑
+        function initScrollHideMenu() {
+            let lastScrollTop = 0;
+            const menu = document.getElementById('menu');
+
+            window.addEventListener('scroll', function() {
+                let currentScroll = window.pageYOffset || document.documentElement.scrollTop;
+                
+                if (currentScroll > 50) {
+                    if (currentScroll > lastScrollTop) {
+                        // 向下滚动：隐藏 Menu
+                        menu.classList.add('hidden');
+                    } else {
+                        // 向上滚动：显示 Menu
+                        menu.classList.remove('hidden');
+                    }
+                } else {
+                    menu.classList.remove('hidden');
+                }
+                lastScrollTop = currentScroll <= 0 ? 0 : currentScroll;
+            }, false);
         }
 
-        // 高精度自然排序算法
-        files.sort((a, b) => {
-          const rawA = typeof a === 'string' ? a : (a.name || a.src || '');
-          const rawB = typeof b === 'string' ? b : (b.name || b.src || '');
-          
-          const cleanA = rawA.split('/').pop().replace(/^\d{10,}_/, '');
-          const cleanB = rawB.split('/').pop().replace(/^\d{10,}_/, '');
-          
-          const regex = /(\d+)|(\D+)/g;
-          const chunksA = cleanA.match(regex) || [];
-          const chunksB = cleanB.match(regex) || [];
-          
-          for (let i = 0; i < Math.max(chunksA.length, chunksB.length); i++) {
-            if (!chunksA[i]) return -1;
-            if (!chunksB[i]) return 1;
+        // 2. 获取图床目录列表
+        async function fetchFolderList() {
+            try {
+                // 如果图床单页限制了15个，可尝试带上 limit 参数拉取更多，如 /api/manage/list?limit=1000
+                const response = await fetch(API_LIST_URL);
+                const data = await response.json();
+                
+                const files = Array.isArray(data) ? data : (data.data || data.files || []);
+                processFolders(files);
+            } catch (error) {
+                console.error('获取目录失败:', error);
+                document.getElementById('loading-tip').innerText = '加载目录失败，请检查 API 接口。';
+            }
+        }
+
+        // 3. 提取文件夹并按高精度自然升序排序填充下拉菜单
+        function processFolders(files) {
+            const folderSet = new Set();
+
+            files.forEach(file => {
+                const filePath = file.name || file.filename || file.path || '';
+                const lastSlashIndex = filePath.lastIndexOf('/');
+                
+                if (lastSlashIndex !== -1) {
+                    const folderPath = filePath.substring(0, lastSlashIndex);
+                    folderSet.add(folderPath);
+                }
+            });
+
+            const folders = Array.from(folderSet);
             
-            const chunkA = chunksA[i];
-            const chunkB = chunksB[i];
-            
-            const isNumA = /^\d+$/.test(chunkA);
-            const isNumB = /^\d+$/.test(chunkB);
-            
-            if (isNumA && isNumB) {
-              const diff = parseInt(chunkA, 10) - parseInt(chunkB, 10);
-              if (diff !== 0) return diff;
+            // 💡 强制按自然升序排列（卷01、卷02、卷03...）
+            folders.sort((a, b) => compareNatural(a, b));
+
+            const select = document.getElementById('folder-select');
+            folders.forEach(folder => {
+                const option = document.createElement('option');
+                option.value = folder;
+                option.textContent = folder;
+                select.appendChild(option);
+            });
+
+            if (folders.length > 0) {
+                select.value = folders[0];
+                changeFolder();
             } else {
-              const comp = chunkA.localeCompare(chunkB);
-              if (comp !== 0) return comp;
+                document.getElementById('loading-tip').innerText = '未检测到任何云端虚拟文件夹，请先上传漫画。';
             }
-          }
-          return 0;
-        });
+        }
 
-        const currentMode = document.getElementById('btnWf').classList.contains('active') ? 'waterfall' : 'webtoon';
-        const sizeClass = isFitWidth ? 'fit-width' : 'orig-size';
-        gallery.className = 'gallery ' + currentMode + ' ' + sizeClass;
-        gallery.innerHTML = '';
+        // 4. 切换卷册时加载对应目录下的所有图片
+        async function changeFolder() {
+            const selectedFolder = document.getElementById('folder-select').value;
+            if (!selectedFolder) return;
 
-        // 渲染页面 DOM
-        files.forEach((item, idx) => {
-          const rawName = typeof item === 'string' ? item : (item.name || item.src);
-          const imgUrl = rawName.startsWith('http') ? rawName : `${domain}/file/${rawName.replace(/^\/?file\//, '')}`;
-          const cleanName = rawName.split('/').pop().replace(/^\d{10,}_/, '');
+            const container = document.getElementById('reader-container');
+            container.innerHTML = '<div id="loading-tip">正在加载漫画图片...</div>';
 
-          const card = document.createElement('div');
-          card.className = 'card';
-          card.innerHTML = `
-            <a href="${imgUrl}" data-fancybox="manga-browser" data-caption="第 ${idx + 1} 页 - ${cleanName}">
-              <img data-src="${imgUrl}" alt="Page ${idx + 1}" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 300 400'%3E%3C/svg%3E">
-            </a>
-            <span class="page-badge">${idx + 1} / ${files.length}</span>
-          `;
-          gallery.appendChild(card);
-        });
+            try {
+                const response = await fetch(API_LIST_URL);
+                const data = await response.json();
+                const files = Array.isArray(data) ? data : (data.data || data.files || []);
 
-        const observer = new IntersectionObserver((entries, obs) => {
-          entries.forEach(entry => {
-            if (entry.isIntersecting) {
-              const img = entry.target;
-              img.src = img.dataset.src;
-              obs.unobserve(img);
+                // 筛选出当前选中文件夹下的图片文件
+                const folderImages = files.filter(file => {
+                    const filePath = file.name || file.filename || file.path || '';
+                    return filePath.startsWith(selectedFolder + '/') && isImageFile(filePath);
+                });
+
+                // 💡 确保图片按自然升序排列 (000.jpg, 001.jpg, 002.jpg...)
+                folderImages.sort((a, b) => {
+                    const nameA = (a.name || a.filename || a.path || '').split('/').pop();
+                    const nameB = (b.name || b.filename || b.path || '').split('/').pop();
+                    return compareNatural(nameA, nameB);
+                });
+
+                renderImages(folderImages);
+
+            } catch (error) {
+                console.error('加载图片出错:', error);
+                container.innerHTML = '<div id="loading-tip">加载图片列表失败。</div>';
             }
-          });
-        }, { rootMargin: '1200px 0px' });
+        }
 
-        document.querySelectorAll('img[data-src]').forEach(img => observer.observe(img));
+        // 5. 渲染无缝条漫图片列表
+        function renderImages(images) {
+            const container = document.getElementById('reader-container');
+            container.innerHTML = '';
 
-      } catch (e) {
-        gallery.innerHTML = `<p style="padding:40px; text-align:center; color:#f87171;">加载失败：${e.message}。请确保已在同域登录过 /dashboard 或正确输入了密码。</p>`;
-      }
-    }
+            if (images.length === 0) {
+                container.innerHTML = '<div id="loading-tip">此目录下没有找到图片。</div>';
+                return;
+            }
 
-    function enterDir(targetPath) {
-      document.getElementById('dir').value = targetPath;
-      loadManga();
-    }
-  </script>
+            images.forEach(img => {
+                const imgElement = document.createElement('img');
+                imgElement.src = img.url || img.src || img.link || ('/' + (img.name || img.filename || img.path));
+                imgElement.className = 'manga-page';
+                imgElement.loading = 'lazy'; // 浏览器原生懒加载
+                
+                imgElement.onerror = function() {
+                    this.alt = '图片加载失败: ' + imgElement.src;
+                };
+
+                container.appendChild(imgElement);
+            });
+        }
+
+        // 6. 切换阅读模式（自适应满宽 / 原始尺寸）
+        function toggleMode() {
+            const container = document.getElementById('reader-container');
+            const btn = document.getElementById('mode-btn');
+
+            if (currentMode === 'fit-width') {
+                currentMode = 'fit-original';
+                container.classList.remove('fit-width');
+                container.classList.add('fit-original');
+                btn.textContent = '切换：原图';
+            } else {
+                currentMode = 'fit-width';
+                container.classList.remove('fit-original');
+                container.classList.add('fit-width');
+                btn.textContent = '切换：满宽';
+            }
+        }
+
+        // 7. 高精度自然升序排序算法
+        function compareNatural(a, b) {
+            const ax = [], bx = [];
+            a.replace(/(\d+)|(\D+)/g, (_, $1, $2) => { ax.push([$1 || Infinity, $2 || '']); });
+            b.replace(/(\d+)|(\D+)/g, (_, $1, $2) => { bx.push([$1 || Infinity, $2 || '']); });
+            
+            while (ax.length && bx.length) {
+                const an = ax.shift();
+                const bn = bx.shift();
+                const nn = (an[0] - bn[0]) || an[1].localeCompare(bn[1]);
+                if (nn) return nn;
+            }
+            return ax.length - bx.length;
+        }
+
+        // 8. 判断是否为图片后缀
+        function isImageFile(filename) {
+            return /\.(jpg|jpeg|png|webp|avif|gif)$/i.test(filename);
+        }
+    </script>
 </body>
 </html>
