@@ -516,11 +516,7 @@ export async function readIndex(context, options = {}) {
         // 处理目录满足无头有尾的格式，根目录为空
         const dirPrefix = directory === '' || directory.endsWith('/') ? directory : directory + '/';
 
-        // 处理挂起的操作
-        const mergeResult = await mergeOperationsToIndex(context);
-        if (!mergeResult.success) {
-            throw new Error('Failed to merge operations: ' + mergeResult.error);
-        }
+        // 【已移除自动 mergeOperationsToIndex，避免每次读列表时触发写库和 503 超时】
 
         // 获取当前索引
         const index = await getIndex(context);
