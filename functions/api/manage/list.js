@@ -17,9 +17,10 @@ export async function onRequest(context) {
     const { request, waitUntil } = context;
     const url = new URL(request.url);
 
-    // 解析查询参数
+    // 解析查询参数（增加安全上限，防止单次 count 过大导致 503 CPU 超限）
     let start = parseInt(url.searchParams.get('start'), 10) || 0;
-    let count = parseInt(url.searchParams.get('count'), 10) || 50;
+    let rawCount = parseInt(url.searchParams.get('count'), 10);
+    let count = isNaN(rawCount) ? 50 : (rawCount === -1 ? -1 : Math.min(rawCount, 300));
     let sum = url.searchParams.get('sum') === 'true';
     let recursive = url.searchParams.get('recursive') === 'true';
     let dir = url.searchParams.get('dir') || '';
@@ -34,16 +35,13 @@ export async function onRequest(context) {
     let fileType = url.searchParams.get('fileType') || '';
     let channelName = url.searchParams.get('channelName') || '';
 
-    // 处理搜索关键字
     if (search) {
         search = decodeURIComponent(search).trim();
     }
 
-    // 处理标签参数
     const includeTagsArray = includeTags ? includeTags.split(',').map(t => t.trim()).filter(t => t) : [];
     const excludeTagsArray = excludeTags ? excludeTags.split(',').map(t => t.trim()).filter(t => t) : [];
 
-    // 处理筛选参数（支持逗号分隔的多选）
     const listTypeArray = listType ? listType.split(',').map(t => t.trim()).filter(t => t) : [];
     const accessStatusArray = accessStatus ? accessStatus.split(',').map(t => t.trim()).filter(t => t) : [];
     const labelArray = label ? label.split(',').map(t => t.trim()).filter(t => t) : [];
@@ -51,9 +49,7 @@ export async function onRequest(context) {
     const channelArray = channel ? channel.split(',').map(t => t.trim()).filter(t => t) : [];
     const channelNameArray = channelName ? channelName.split(',').map(t => t.trim()).filter(t => t) : [];
 
-    // 处理目录参数
     if (dir) {
-        // 路径安全处理：防止路径穿越
         dir = dir.replace(/\.\./g, '_').replace(/\\/g, '/').replace(/\/{2,}/g, '/');
     }
     if (dir.startsWith('/')) {
@@ -156,9 +152,9 @@ export async function onRequest(context) {
             includeSubdirFiles: recursive,
         });
 
-        // 索引读取失败，直接从 KV 中获取所有文件记录
+        // 索引读取失败时的安全降级：取消原有的 while(true) 全库扫描，限制只拉取单页
         if (!result.success) {
-            const dbRecords = await getAllFileRecords(context.env, dir);
+            const dbRecords = await getSafeFileRecords(context.env, dir, count);
 
             return new Response(JSON.stringify({
                 files: dbRecords.files,
@@ -168,7 +164,7 @@ export async function onRequest(context) {
                 directFolderCount: dbRecords.directFolderCount,
                 returnedCount: dbRecords.returnedCount,
                 indexLastUpdated: Date.now(),
-                isIndexedResponse: false // 标记这是来自 KV 的响应
+                isIndexedResponse: false
             }), {
                 headers: { "Content-Type": "application/json", ...corsHeaders }
             });
@@ -190,9 +186,13 @@ export async function onRequest(context) {
             directFolderCount: result.directFolderCount,
             returnedCount: result.returnedCount,
             indexLastUpdated: result.indexLastUpdated,
-            isIndexedResponse: true // 标记这是来自索引的响应
+            isIndexedResponse: true
         }), {
-            headers: { "Content-Type": "application/json", ...corsHeaders }
+            headers: {
+                "Content-Type": "application/json",
+                "Cache-Control": "private, max-age=5",
+                ...corsHeaders
+            }
         });
 
     } catch (error) {
@@ -207,50 +207,33 @@ export async function onRequest(context) {
     }
 }
 
-async function getAllFileRecords(env, dir) {
+/**
+ * 安全降级查询：严禁 while(true) 拉取上万条记录，只查单批数据防止 503 崩溃
+ */
+async function getSafeFileRecords(env, dir, limitCount = 200) {
     const allRecords = [];
-    let cursor = null;
 
     try {
         const db = getDatabase(env);
         const metadataViewContext = await createMetadataViewContext(db, env);
 
-        while (true) {
-            const response = await db.list({
-                prefix: dir,
-                limit: 1000,
-                cursor: cursor
-            });
+        const response = await db.list({
+            prefix: dir,
+            limit: Math.min(Math.max(limitCount, 100), 400)
+        });
 
-            // 检查响应格式
-            if (!response || !response.keys || !Array.isArray(response.keys)) {
-                console.error('Invalid response from database list:', response);
-                break;
-            }
-
-            cursor = response.cursor;
-
+        if (response && response.keys && Array.isArray(response.keys)) {
             for (const item of response.keys) {
-                // 跳过管理相关的键
                 if (item.name.startsWith('manage@') || item.name.startsWith('chunk_')) {
                     continue;
                 }
-
-                // 跳过没有元数据的文件
                 if (!item.metadata || !item.metadata.TimeStamp) {
                     continue;
                 }
-
                 allRecords.push(await serializeFileRecordForManagement(db, env, item, metadataViewContext));
             }
-
-            if (!cursor) break;
-
-            // 添加协作点
-            await new Promise(resolve => setTimeout(resolve, 10));
         }
 
-        // 提取目录信息
         const directories = new Set();
         const filteredRecords = [];
         allRecords.forEach(item => {
@@ -273,7 +256,7 @@ async function getAllFileRecords(env, dir) {
         };
 
     } catch (error) {
-        console.error('Error in getAllFileRecords:', error);
+        console.error('Error in getSafeFileRecords:', error);
         return {
             files: [],
             directories: [],
