@@ -1,6 +1,32 @@
 /**
- * D1 数据库操作工具类
+ * D1 数据库操作工具类 (高性能优化版：消除 INSERT OR REPLACE 锁表 + 内置 Settings 内存缓存)
  */
+
+// Worker 实例级内存缓存，大幅削减 settings 表的高频重复 SELECT
+const settingsCache = new Map();
+const CACHE_TTL_MS = 60 * 1000; // 缓存有效期 60 秒
+
+function getFromCache(key) {
+    const item = settingsCache.get(key);
+    if (!item) return undefined;
+    if (Date.now() > item.expiry) {
+        settingsCache.delete(key);
+        return undefined;
+    }
+    return item.value;
+}
+
+function setToCache(key, value) {
+    // 限制最大缓存条目数，防止内存无限增长
+    if (settingsCache.size > 500) {
+        const firstKey = settingsCache.keys().next().value;
+        settingsCache.delete(firstKey);
+    }
+    settingsCache.set(key, {
+        value: value,
+        expiry: Date.now() + CACHE_TTL_MS
+    });
+}
 
 class D1Database {
     constructor(db) {
@@ -12,6 +38,7 @@ class D1Database {
 
 /**
  * 保存文件记录 (替代 KV.put)
+ * 优化：使用 ON CONFLICT(id) DO UPDATE 替代 INSERT OR REPLACE，避免隐式 DELETE 和重建全部索引
  */
 D1Database.prototype.putFile = function(fileId, value, options) {
     value = value || '';
@@ -22,12 +49,22 @@ D1Database.prototype.putFile = function(fileId, value, options) {
     var extractedFields = this.extractMetadataFields(metadata);
     
     var stmt = this.db.prepare(
-        'INSERT OR REPLACE INTO files (' +
+        'INSERT INTO files (' +
         'id, value, metadata, file_name, file_type, file_size, ' +
         'upload_ip, upload_address, list_type, timestamp, ' +
         'label, directory, channel, channel_name, ' +
         'tg_file_id, tg_chat_id, tg_bot_token, is_chunked' +
-        ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
+        'ON CONFLICT(id) DO UPDATE SET ' +
+        'value = excluded.value, ' +
+        'metadata = excluded.metadata, ' +
+        'file_name = excluded.file_name, ' +
+        'file_type = excluded.file_type, ' +
+        'file_size = excluded.file_size, ' +
+        'list_type = excluded.list_type, ' +
+        'timestamp = excluded.timestamp, ' +
+        'label = excluded.label, ' +
+        'directory = excluded.directory'
     );
     
     return stmt.bind(
@@ -56,8 +93,7 @@ D1Database.prototype.putFile = function(fileId, value, options) {
  * 获取文件记录 (替代 KV.get)
  */
 D1Database.prototype.getFile = function(fileId) {
-    var self = this;
-    var stmt = this.db.prepare('SELECT * FROM files WHERE id = ?');
+    var stmt = this.db.prepare('SELECT value, metadata FROM files WHERE id = ?');
     return stmt.bind(fileId).first().then(function(result) {
         if (!result) return null;
         
@@ -89,7 +125,7 @@ D1Database.prototype.deleteFile = function(fileId) {
 D1Database.prototype.listFiles = function(options) {
     options = options || {};
     var prefix = options.prefix || '';
-    var limit = options.limit || 1000;
+    var limit = Math.min(options.limit || 500, 1000);
     var cursor = options.cursor || null;
     
     var query = 'SELECT id, metadata FROM files';
@@ -139,14 +175,24 @@ D1Database.prototype.listFiles = function(options) {
 
 /**
  * 保存设置 (替代 KV.put)
+ * 优化：使用 ON CONFLICT 原地更新并同步更新内存缓存
  */
 D1Database.prototype.putSetting = function(key, value, category) {
     if (!category && key.startsWith('manage@sysConfig@')) {
         category = key.split('@')[2];
     }
     
+    // 如果缓存中值完全一致，直接跳过数据库写入，节省 D1 写入配额！
+    const cachedVal = getFromCache(key);
+    if (cachedVal !== undefined && cachedVal === value) {
+        return Promise.resolve({ success: true, cached: true });
+    }
+
+    setToCache(key, value);
+    
     var stmt = this.db.prepare(
-        'INSERT OR REPLACE INTO settings (key, value, category) VALUES (?, ?, ?)'
+        'INSERT INTO settings (key, value, category) VALUES (?, ?, ?) ' +
+        'ON CONFLICT(key) DO UPDATE SET value = excluded.value, category = excluded.category'
     );
     
     return stmt.bind(key, value, category).run();
@@ -154,11 +200,21 @@ D1Database.prototype.putSetting = function(key, value, category) {
 
 /**
  * 获取设置 (替代 KV.get)
+ * 优化：优先命中内存缓存，避免每次 API 请求都查库
  */
 D1Database.prototype.getSetting = function(key) {
+    const cached = getFromCache(key);
+    if (cached !== undefined) {
+        return Promise.resolve(cached);
+    }
+
     var stmt = this.db.prepare('SELECT value FROM settings WHERE key = ?');
     return stmt.bind(key).first().then(function(result) {
-        return result ? result.value : null;
+        const val = result ? result.value : null;
+        if (val !== null) {
+            setToCache(key, val);
+        }
+        return val;
     });
 };
 
@@ -166,6 +222,7 @@ D1Database.prototype.getSetting = function(key) {
  * 删除设置 (替代 KV.delete)
  */
 D1Database.prototype.deleteSetting = function(key) {
+    settingsCache.delete(key);
     var stmt = this.db.prepare('DELETE FROM settings WHERE key = ?');
     return stmt.bind(key).run();
 };
@@ -196,6 +253,7 @@ D1Database.prototype.listSettings = function(options) {
     return stmt.all().then(function(response) {
         var results = response.results || [];
         var keys = results.map(function(row) {
+            setToCache(row.key, row.value);
             return {
                 name: row.key,
                 value: row.value
@@ -213,7 +271,8 @@ D1Database.prototype.listSettings = function(options) {
  */
 D1Database.prototype.putIndexOperation = function(operationId, operation) {
     var stmt = this.db.prepare(
-        'INSERT OR REPLACE INTO index_operations (id, type, timestamp, data) VALUES (?, ?, ?, ?)'
+        'INSERT INTO index_operations (id, type, timestamp, data) VALUES (?, ?, ?, ?) ' +
+        'ON CONFLICT(id) DO UPDATE SET type = excluded.type, timestamp = excluded.timestamp, data = excluded.data'
     );
     
     return stmt.bind(
@@ -323,7 +382,6 @@ D1Database.prototype.put = function(key, value, options) {
         var operation = JSON.parse(value);
         return this.putIndexOperation(operationId, operation);
     } else if (key.startsWith('manage@')) {
-        // 所有 manage@ 前缀的键统一存入 settings 表
         var category = key.split('@')[1] || '';
         return this.putSetting(key, value, category);
     } else {
@@ -335,8 +393,6 @@ D1Database.prototype.put = function(key, value, options) {
  * 通用的get方法，根据key类型自动选择获取位置
  */
 D1Database.prototype.get = function(key) {
-    var self = this;
-
     if (key.startsWith('manage@index@operation_')) {
         var operationId = key.replace('manage@index@operation_', '');
         return this.getIndexOperation(operationId).then(function(operation) {
@@ -355,8 +411,6 @@ D1Database.prototype.get = function(key) {
  * 通用的getWithMetadata方法
  */
 D1Database.prototype.getWithMetadata = function(key) {
-    var self = this;
-
     if (key.startsWith('manage@')) {
         return this.getSetting(key).then(function(value) {
             return value ? { value: value, metadata: {} } : null;
@@ -386,7 +440,6 @@ D1Database.prototype.delete = function(key) {
 D1Database.prototype.list = function(options) {
     options = options || {};
     var prefix = options.prefix || '';
-    var self = this;
 
     if (prefix.startsWith('manage@index@operation_')) {
         return this.listIndexOperations(options).then(function(operations) {
