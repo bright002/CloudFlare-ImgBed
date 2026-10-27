@@ -168,7 +168,7 @@
       }
 
       // 关键防崩策略：若未指定具体文件夹，单次请求量降为 50（防 1 万条全表扫描 503）；若指定了卷目录，单次拉取 200 张
-      const requestCount = dir ? 200 : 50;
+      const requestCount = dir ? 400 : 50;
       const apiUrl = `${domain}/api/manage/list?dir=${encodeURIComponent(dir)}&start=0&count=${requestCount}`;
 
       try {
