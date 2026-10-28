@@ -154,6 +154,10 @@
     async function loadManga() {
       const domain = window.location.origin;
       const dir = document.getElementById('dir').value.trim();
+      if (!dir) {
+        dir = '漫画';
+        document.getElementById('dir').value = dir;
+      }
       const auth = document.getElementById('token').value.trim();
       localStorage.setItem('imgbed_auth', auth);
 
