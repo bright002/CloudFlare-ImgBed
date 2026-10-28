@@ -97,6 +97,11 @@
 
     let isFitWidth = true;
 
+    window.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('dir').value = '漫画';
+      loadManga();
+    });
+
     // 监听页面滚动自动隐藏/显示顶部工具栏
     (function() {
       let lastScrollY = window.scrollY;
