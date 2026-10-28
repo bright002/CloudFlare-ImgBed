@@ -96,6 +96,11 @@
     document.getElementById('token').value = localStorage.getItem('imgbed_auth') || '';
 
     let isFitWidth = true;
+    
+    window.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('dir').value = '绅士漫画';
+      loadManga();
+    });
 
     // 监听页面滚动自动隐藏/显示顶部工具栏
     (function() {
